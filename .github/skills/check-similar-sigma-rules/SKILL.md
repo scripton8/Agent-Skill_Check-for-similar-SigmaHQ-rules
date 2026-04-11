@@ -49,14 +49,15 @@ Invoke this skill when:
    - Rule UUID (`id` field)
    - Description
    - A direct link to the rule file in the repository
+   - The type of the match, if a found detection covers the new idea fully, partly or might be used for extension
 
 ## Output Format
 
 If matching rules are found:
 
-| Rule Name | Rule ID | Description | Link |
-|-----------|---------|-------------|------|
-| [Rule Title] | [UUID] | [Description] | [View Rule] |
+| Rule Name | Rule ID | Description | Link | Match Type |
+|-----------|---------|-------------|------|------|
+| [Rule Title] | [UUID] | [Description] | [View Rule] | [Match Type] |
 
 > 💡 Review these rules to determine if any fully cover the described detection, or if any could
 > be **extended** to include the new detection scenario.
