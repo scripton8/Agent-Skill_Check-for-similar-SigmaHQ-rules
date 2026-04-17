@@ -9,27 +9,55 @@ idea or Sigma rule is submitted via an issue or pull request.
 When an **issue** or **pull request** is opened (or edited), the workflow:
 
 1. Reads the title and body of the issue/PR
-2. Searches the repository for Sigma rule files (`.yml` / `.yaml`)
-3. Scores each rule for relevance using keyword similarity
-4. Posts a comment with a table of the most similar rules – including rule name,
-   UUID, description, and a direct link to the file
+2. Extracts detection concepts (TTPs, tools, log sources, MITRE ATT&CK tags)
+3. Searches the repository for Sigma rule files (`.yml` / `.yaml`) and
+   pipeline/backend configuration files
+4. Evaluates each rule against strict coverage and extensibility criteria
+5. Posts a comment showing only **high-confidence** matches – rules that either
+   fully cover the described detection or can be extended with small, safe,
+   additive changes
 
-If no similar rules are found, the comment says so and encourages creating a
+If no qualifying rules are found, the comment says so and encourages creating a
 new rule to fill the coverage gap.
 
-### Example comment
+### Match classification
 
-> ## 🔍 Similar Sigma Rules Check
+Every candidate rule is classified into one of three categories:
+
+| Classification | Meaning |
+|---|---|
+| **Full Coverage** | The rule's detection logic, indicator set, telemetry, and log source substantially match the requested idea — no changes needed |
+| **Extensible** | The rule's purpose and telemetry are logically related; missing indicators can be added as isolated, additive branches without touching existing logic |
+| **Out of Scope** | Only generic keyword overlap, different telemetry class, or a major rewrite would be needed — excluded from results |
+
+Only **Full Coverage** and **Extensible** rules are included in the output.
+
+### Patch suggestions
+
+For every **Extensible** result the skill produces a concrete unified diff
+showing exactly which lines to add, with branch isolation guarantees:
+
+- New logic is added as a separate branch (e.g., `selection_new_*`)
+- The original `condition` is preserved; the new branch is combined explicitly
+- No existing detection selections, filters, or conditions are removed
+- Only SigmaHQ-standard rule keys are modified
+
+### Example agent comment
+
+> | Rule Name | Rule ID | Description | Link | Match Type | Required Extension | Logsource Compatibility | Pipeline Compatibility |
+> |-----------|---------|-------------|------|------------|--------------------|-------------------------|------------------------|
+> | Network Tunnelling Tool Usage - Chisel | `abc123…` | Detects usage of Chisel… | [View Rule](…) | Extensible | Add `chisel.exe` to existing tool list | Compatible | Compatible |
+> | Network Tunnelling via SSH | `def456…` | Detects SSH-based port forwarding… | [View Rule](…) | Full Coverage | None | Compatible | Compatible |
 >
-> Found **2** potentially related rule(s) in this repository:
+> Patch suggestion for `Network Tunnelling Tool Usage - Chisel`:
 >
-> | Rule Name | Rule ID | Description | Link |
-> |-----------|---------|-------------|------|
-> | Network Tunnelling Tool Usage - Chisel | `` `abc123…` `` | Detects usage of Chisel… | [View Rule](…) |
-> | Network Tunnelling via SSH | `` `def456…` `` | Detects SSH-based port forwarding… | [View Rule](…) |
->
-> 💡 **Review these rules** to determine if any fully cover the described
-> detection, or if any could be **extended** to include it.
+> ```diff
+> # File: rules/network/net_tunnelling_chisel.yml
+> -    tools|contains:
+> +    tools|contains:
+>          - 'plink.exe'
+> +        - 'chisel.exe'
+> ```
 
 ## Repository layout
 
@@ -75,6 +103,11 @@ The script looks for Sigma rule files in the following directories (in order):
 If none of these exist, every `.yml` / `.yaml` file in the repository
 (excluding `.github/`) is scanned.
 
+The agent skill also scans the `pipelines/` directory (and any
+subdirectories) for Sigma pipeline and backend conversion configuration, which
+is used to assess whether field mappings needed by a proposed extension are
+already available without a major pipeline redesign.
+
 ## Running tests locally
 
 ```bash
@@ -92,9 +125,12 @@ The following constants in `scripts/check_similar_rules.py` can be adjusted:
 | `MAX_RESULTS` | `10` | Maximum number of rules shown in the comment |
 | `RULES_DIRECTORIES` | see above | Directories searched for Sigma rules |
 
-## How similarity is calculated
+## How similarity and coverage are evaluated
 
-For each Sigma rule the script:
+### Automated workflow (GitHub Actions)
+
+The `check_similar_rules.py` script performs a lightweight first pass for each
+Sigma rule:
 
 1. Collects all text from `title`, `description`, `tags`, `detection`,
    `logsource`, `author`, `references`, and `falsepositives`
@@ -105,3 +141,21 @@ For each Sigma rule the script:
    `description` (+0.1)
 
 Rules scoring ≥ `MIN_SIMILARITY_SCORE` are returned, sorted by score descending.
+
+### Agent skill (Copilot / SKILL.md)
+
+When invoked as a Copilot agent skill, the analysis goes deeper. Each rule is
+evaluated across multiple dimensions:
+
+| Dimension | What is checked |
+|---|---|
+| **Detection logic** | Parent/child relationships, process-chain behavior, correlation |
+| **Indicator set** | Binaries, command-line patterns, paths, registry keys, network indicators |
+| **Field anchor compatibility** | Fields needed for new indicators already exist in the rule or pipeline |
+| **Telemetry semantics** | Same event intent (e.g., process creation vs. proxy request) |
+| **Logsource compatibility** | Product/service/category alignment (minor naming differences allowed) |
+| **Purpose linkage** | Rule intent is logically related to the requested detection objective |
+| **ATT&CK / tags relevance** | Technique/tactic family overlap or adjacency |
+
+Rules are automatically rejected when the match is based solely on shared
+logsource/fields, generic terms, or a different detection objective.
